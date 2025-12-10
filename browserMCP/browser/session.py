@@ -41,7 +41,15 @@ _GLOB_WARNING_SHOWN = False  # used inside _is_url_allowed to avoid spamming the
 
 
 def truncate_url(s: str, max_len: int | None = None) -> str:
-	"""Truncate/pretty-print a URL with a maximum length, removing the protocol and www. prefix"""
+	"""Truncate/pretty-print a URL with a maximum length, removing the protocol and www. prefix.
+
+	Args:
+		s (str): The URL string.
+		max_len (int | None): The maximum length for the truncated string.
+
+	Returns:
+		str: The formatted URL string.
+	"""
 	s = s.replace('https://', '').replace('http://', '').replace('www.', '')
 	if max_len is not None and len(s) > max_len:
 		return s[:max_len] + '…'
@@ -49,7 +57,10 @@ def truncate_url(s: str, max_len: int | None = None) -> str:
 
 
 def require_initialization(func):
-	"""decorator for BrowserSession methods to require the BrowserSession be already active"""
+	"""Decorator for BrowserSession methods to require the BrowserSession be already active.
+
+	Ensures that `BrowserSession.start()` has been called before accessing certain methods.
+	"""
 
 	@wraps(func)
 	def wrapper(self, *args, **kwargs):
@@ -76,7 +87,11 @@ DEFAULT_BROWSER_PROFILE = BrowserProfile()
 @dataclass
 class CachedClickableElementHashes:
 	"""
-	Clickable elements hashes for the last state
+	Stores hashes of clickable elements for the last known state to optimize processing.
+
+	Attributes:
+		url (str): The URL of the page where hashes were computed.
+		hashes (set[str]): A set of element hashes.
 	"""
 
 	url: str
@@ -188,6 +203,14 @@ class BrowserSession(BaseModel):
 	# 	return getattr(self.browser_profile, key)
 
 	async def start(self) -> Self:
+		"""Initializes the browser session.
+
+		This includes setting up Playwright, connecting to or launching a browser,
+		creating a context, and initializing viewport and tab detection.
+
+		Returns:
+			Self: The initialized BrowserSession instance.
+		"""
 		# finish initializing/validate the browser_profile:
 		assert isinstance(self.browser_profile, BrowserProfile)
 		self.browser_profile.prepare_user_data_dir()  # create/unlock the <user_data_dir>/SingletonLock
@@ -209,6 +232,7 @@ class BrowserSession(BaseModel):
 		return self
 
 	async def stop(self) -> None:
+		"""Stops the browser session and closes resources."""
 		if not self.browser_profile.keep_alive:
 			logger.info('🛑 Shutting down browser...')
 			if self.browser_context:
@@ -298,6 +322,7 @@ class BrowserSession(BaseModel):
 		return self.browser
 
 	async def setup_browser_context(self) -> None:
+		"""Sets up the browser context, either by using an existing one or launching a new one."""
 		# if we have a browser_context but no browser, use the browser from the context
 		if self.browser_context:
 			logger.info(f'🌎 Using existing user-provided browser_context and browser: {self.browser_context}')
@@ -403,6 +428,7 @@ class BrowserSession(BaseModel):
 		return self.browser_context
 
 	async def setup_foreground_tab_detection(self) -> None:
+		"""Sets up listeners to detect which tab is currently in the foreground."""
 		# Uses a combination of:
 		# - visibilitychange events
 		# - window focus/blur events
@@ -461,13 +487,13 @@ class BrowserSession(BaseModel):
 					console.log('BrowserUse Foreground tab change event fired', document.location.href);
 				}
 			});
-			
+
 			// --- Method 2: focus/blur events, most reliable method for headful browsers ---
 			window.addEventListener('focus', async () => {
 				await window._BrowserUseonTabVisibilityChange({ source: 'focus', url: document.location.href });
 				console.log('BrowserUse Foreground tab change event fired', document.location.href);
 			});
-			
+
 			// --- Method 3: pointermove events (may be fired by agent if we implement AI hover movements) ---
 			// Use a throttled handler to avoid excessive calls
 			// let lastMove = 0;
@@ -757,6 +783,7 @@ class BrowserSession(BaseModel):
 
 	@require_initialization
 	async def close_tab(self, tab_index: int | None = None) -> None:
+		"""Closes a specific tab or the current agent tab."""
 		pages = self.browser_context.pages
 		if not pages:
 			return
@@ -776,6 +803,7 @@ class BrowserSession(BaseModel):
 	# --- Page navigation ---
 	@require_initialization
 	async def navigate(self, url: str) -> None:
+		"""Navigates to a URL, using the current tab or creating a new one."""
 		if self.agent_current_page:
 			await self.agent_current_page.goto(url)
 		else:
@@ -783,6 +811,7 @@ class BrowserSession(BaseModel):
 
 	@require_initialization
 	async def refresh(self) -> None:
+		"""Refreshes the current page."""
 		if self.agent_current_page and not self.agent_current_page.is_closed():
 			await self.agent_current_page.reload()
 		else:
@@ -790,10 +819,12 @@ class BrowserSession(BaseModel):
 
 	@require_initialization
 	async def execute_javascript(self, script: str) -> Any:
+		"""Executes JavaScript on the current page."""
 		page = await self.get_current_page()
 		return await page.evaluate(script)
 
 	async def get_cookies(self) -> list[dict[str, Any]]:
+		"""Retrieves all cookies from the current context."""
 		if self.browser_context:
 			return await self.browser_context.cookies()
 		return []
@@ -827,6 +858,7 @@ class BrowserSession(BaseModel):
 	# 	return list(Path(self.browser_profile.downloads_dir).glob('*'))
 
 	async def _wait_for_stable_network(self):
+		"""Waits for network activity to stabilize on the current page."""
 		pending_requests = set()
 		last_activity = asyncio.get_event_loop().time()
 
@@ -1575,6 +1607,7 @@ class BrowserSession(BaseModel):
 
 	@time_execution_async('--get_locate_element')
 	async def get_locate_element(self, element: DOMElementNode) -> ElementHandle | None:
+		"""Locates a Playwright ElementHandle from a DOMElementNode."""
 		page = await self.get_current_page()
 		current_frame = page
 
@@ -1817,12 +1850,14 @@ class BrowserSession(BaseModel):
 
 	@require_initialization
 	async def get_selector_map(self) -> SelectorMap:
+		"""Retrieves the selector map from the cached state."""
 		if self._cached_browser_state_summary is None:
 			return {}
 		return self._cached_browser_state_summary.selector_map
 
 	@require_initialization
 	async def get_element_by_index(self, index: int) -> ElementHandle | None:
+		"""Retrieves an element handle by its index."""
 		selector_map = await self.get_selector_map()
 		element_handle = await self.get_locate_element(selector_map[index])
 		return element_handle

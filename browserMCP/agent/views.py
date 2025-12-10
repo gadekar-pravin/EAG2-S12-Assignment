@@ -26,7 +26,22 @@ ToolCallingMethod = Literal['function_calling', 'json_mode', 'raw', 'auto', 'too
 
 
 class AgentSettings(BaseModel):
-	"""Options for the agent"""
+	"""Options for the agent.
+
+	Attributes:
+		use_vision (bool): Whether to use vision capabilities.
+		max_failures (int): Maximum number of consecutive failures before stopping.
+		retry_delay (int): Delay in seconds between retries.
+		max_input_tokens (int): Maximum number of input tokens.
+		validate_output (bool): Whether to validate model output.
+		message_context (str | None): Additional context for messages.
+		generate_gif (bool | str): Whether to generate a GIF of the session.
+		available_file_paths (list[str] | None): List of available file paths.
+		include_attributes (list[str]): List of attributes to include in element representation.
+		max_actions_per_step (int): Maximum number of actions allowed per step.
+		tool_calling_method (ToolCallingMethod | None): Method for calling tools.
+		planner_interval (int): Interval for running the planner.
+	"""
 
 	use_vision: bool = True
 	use_vision_for_planner: bool = False
@@ -68,7 +83,18 @@ class AgentSettings(BaseModel):
 
 
 class AgentState(BaseModel):
-	"""Holds all state information for an Agent"""
+	"""Holds all state information for an Agent.
+
+	Attributes:
+		agent_id (str): Unique identifier for the agent.
+		n_steps (int): Current step number.
+		consecutive_failures (int): Number of consecutive failures.
+		last_result (list[ActionResult] | None): Result of the last action.
+		history (AgentHistoryList): History of agent actions and states.
+		last_plan (str | None): The last plan generated.
+		paused (bool): Whether the agent is paused.
+		stopped (bool): Whether the agent is stopped.
+	"""
 
 	agent_id: str = Field(default_factory=lambda: str(uuid.uuid4()))
 	n_steps: int = 1
@@ -87,16 +113,34 @@ class AgentState(BaseModel):
 
 @dataclass
 class AgentStepInfo:
+	"""Information about the current step.
+
+	Attributes:
+		step_number (int): The current step number.
+		max_steps (int): The maximum number of steps allowed.
+	"""
 	step_number: int
 	max_steps: int
 
 	def is_last_step(self) -> bool:
-		"""Check if this is the last step"""
+		"""Check if this is the last step.
+
+		Returns:
+			bool: True if it is the last step, False otherwise.
+		"""
 		return self.step_number >= self.max_steps - 1
 
 
 class ActionResult(BaseModel):
-	"""Result of executing an action"""
+	"""Result of executing an action.
+
+	Attributes:
+		is_done (bool | None): Whether the task is done.
+		success (bool | None): Whether the action was successful.
+		extracted_content (str | None): Content extracted during the action.
+		error (str | None): Error message if the action failed.
+		include_in_memory (bool): Whether to include this result in memory.
+	"""
 
 	is_done: bool | None = False
 	success: bool | None = None
@@ -106,7 +150,14 @@ class ActionResult(BaseModel):
 
 
 class StepMetadata(BaseModel):
-	"""Metadata for a single step including timing and token information"""
+	"""Metadata for a single step including timing and token information.
+
+	Attributes:
+		step_start_time (float): Start time of the step.
+		step_end_time (float): End time of the step.
+		input_tokens (int): Approximate input tokens used.
+		step_number (int): The step number.
+	"""
 
 	step_start_time: float
 	step_end_time: float
@@ -115,12 +166,22 @@ class StepMetadata(BaseModel):
 
 	@property
 	def duration_seconds(self) -> float:
-		"""Calculate step duration in seconds"""
+		"""Calculate step duration in seconds.
+
+		Returns:
+			float: Duration in seconds.
+		"""
 		return self.step_end_time - self.step_start_time
 
 
 class AgentBrain(BaseModel):
-	"""Current state of the agent"""
+	"""Current state of the agent's reasoning.
+
+	Attributes:
+		evaluation_previous_goal (str): Evaluation of the previous goal.
+		memory (str): Current memory state.
+		next_goal (str): The next goal to achieve.
+	"""
 
 	evaluation_previous_goal: str
 	memory: str
@@ -128,9 +189,11 @@ class AgentBrain(BaseModel):
 
 
 class AgentOutput(BaseModel):
-	"""Output model for agent
+	"""Output model for agent.
 
-	@dev note: this model is extended with custom actions in AgentService. You can also use some fields that are not in this model as provided by the linter, as long as they are registered in the DynamicActions model.
+	Attributes:
+		current_state (AgentBrain): The agent's current thought process.
+		action (list[ActionModel]): List of actions to execute.
 	"""
 
 	model_config = ConfigDict(arbitrary_types_allowed=True)
@@ -144,7 +207,14 @@ class AgentOutput(BaseModel):
 
 	@staticmethod
 	def type_with_custom_actions(custom_actions: type[ActionModel]) -> type[AgentOutput]:
-		"""Extend actions with custom actions"""
+		"""Extend actions with custom actions.
+
+		Args:
+			custom_actions (type[ActionModel]): The custom actions model.
+
+		Returns:
+			type[AgentOutput]: A new AgentOutput model including custom actions.
+		"""
 		model_ = create_model(
 			'AgentOutput',
 			__base__=AgentOutput,
@@ -159,7 +229,14 @@ class AgentOutput(BaseModel):
 
 
 class AgentHistory(BaseModel):
-	"""History item for agent actions"""
+	"""History item for agent actions.
+
+	Attributes:
+		model_output (AgentOutput | None): The model's output.
+		result (list[ActionResult]): Results of executed actions.
+		state (BrowserStateHistory): The browser state at this step.
+		metadata (StepMetadata | None): Metadata for the step.
+	"""
 
 	model_output: AgentOutput | None
 	result: list[ActionResult]
@@ -170,6 +247,15 @@ class AgentHistory(BaseModel):
 
 	@staticmethod
 	def get_interacted_element(model_output: AgentOutput, selector_map: SelectorMap) -> list[DOMHistoryElement | None]:
+		"""Retrieves elements interacted with in this step.
+
+		Args:
+			model_output (AgentOutput): The agent output containing actions.
+			selector_map (SelectorMap): Map of element indices to DOM elements.
+
+		Returns:
+			list[DOMHistoryElement | None]: List of interacted elements.
+		"""
 		elements = []
 		for action in model_output.action:
 			index = action.get_index()
@@ -181,7 +267,11 @@ class AgentHistory(BaseModel):
 		return elements
 
 	def model_dump(self, **kwargs) -> dict[str, Any]:
-		"""Custom serialization handling circular references"""
+		"""Custom serialization handling circular references.
+
+		Returns:
+			dict[str, Any]: Serialized data.
+		"""
 
 		# Handle action serialization
 		model_output_dump = None
@@ -201,12 +291,20 @@ class AgentHistory(BaseModel):
 
 
 class AgentHistoryList(BaseModel):
-	"""List of agent history items"""
+	"""List of agent history items.
+
+	Attributes:
+		history (list[AgentHistory]): The list of history items.
+	"""
 
 	history: list[AgentHistory]
 
 	def total_duration_seconds(self) -> float:
-		"""Get total duration of all steps in seconds"""
+		"""Get total duration of all steps in seconds.
+
+		Returns:
+			float: Total duration.
+		"""
 		total = 0.0
 		for h in self.history:
 			if h.metadata:
@@ -218,6 +316,9 @@ class AgentHistoryList(BaseModel):
 		Get total tokens used across all steps.
 		Note: These are from the approximate token counting of the message manager.
 		For accurate token counting, use tools like LangChain Smith or OpenAI's token counters.
+
+		Returns:
+			int: Total input tokens.
 		"""
 		total = 0
 		for h in self.history:
@@ -226,19 +327,35 @@ class AgentHistoryList(BaseModel):
 		return total
 
 	def input_token_usage(self) -> list[int]:
-		"""Get token usage for each step"""
+		"""Get token usage for each step.
+
+		Returns:
+			list[int]: List of token counts per step.
+		"""
 		return [h.metadata.input_tokens for h in self.history if h.metadata]
 
 	def __str__(self) -> str:
-		"""Representation of the AgentHistoryList object"""
+		"""Representation of the AgentHistoryList object.
+
+		Returns:
+			str: String representation.
+		"""
 		return f'AgentHistoryList(all_results={self.action_results()}, all_model_outputs={self.model_actions()})'
 
 	def __repr__(self) -> str:
-		"""Representation of the AgentHistoryList object"""
+		"""Representation of the AgentHistoryList object.
+
+		Returns:
+			str: String representation.
+		"""
 		return self.__str__()
 
 	def save_to_file(self, filepath: str | Path) -> None:
-		"""Save history to JSON file with proper serialization"""
+		"""Save history to JSON file with proper serialization.
+
+		Args:
+			filepath (str | Path): The path to save the file.
+		"""
 		try:
 			Path(filepath).parent.mkdir(parents=True, exist_ok=True)
 			data = self.model_dump()
@@ -280,14 +397,26 @@ class AgentHistoryList(BaseModel):
 	# 		raise e
 
 	def model_dump(self, **kwargs) -> dict[str, Any]:
-		"""Custom serialization that properly uses AgentHistory's model_dump"""
+		"""Custom serialization that properly uses AgentHistory's model_dump.
+
+		Returns:
+			dict[str, Any]: Serialized data.
+		"""
 		return {
 			'history': [h.model_dump(**kwargs) for h in self.history],
 		}
 
 	@classmethod
 	def load_from_file(cls, filepath: str | Path, output_model: type[AgentOutput]) -> AgentHistoryList:
-		"""Load history from JSON file"""
+		"""Load history from JSON file.
+
+		Args:
+			filepath (str | Path): Path to the JSON file.
+			output_model (type[AgentOutput]): The output model class used for validation.
+
+		Returns:
+			AgentHistoryList: The loaded history list.
+		"""
 		with open(filepath, encoding='utf-8') as f:
 			data = json.load(f)
 		# loop through history and validate output_model actions to enrich with custom actions
@@ -303,13 +432,21 @@ class AgentHistoryList(BaseModel):
 		return history
 
 	def last_action(self) -> None | dict:
-		"""Last action in history"""
+		"""Last action in history.
+
+		Returns:
+			None | dict: The last action dictionary or None.
+		"""
 		if self.history and self.history[-1].model_output:
 			return self.history[-1].model_output.action[-1].model_dump(exclude_none=True)
 		return None
 
 	def errors(self) -> list[str | None]:
-		"""Get all errors from history, with None for steps without errors"""
+		"""Get all errors from history, with None for steps without errors.
+
+		Returns:
+			list[str | None]: List of errors.
+		"""
 		errors = []
 		for h in self.history:
 			step_errors = [r.error for r in h.result if r.error]
@@ -319,20 +456,32 @@ class AgentHistoryList(BaseModel):
 		return errors
 
 	def final_result(self) -> None | str:
-		"""Final result from history"""
+		"""Final result from history.
+
+		Returns:
+			None | str: The extracted content of the final result.
+		"""
 		if self.history and self.history[-1].result[-1].extracted_content:
 			return self.history[-1].result[-1].extracted_content
 		return None
 
 	def is_done(self) -> bool:
-		"""Check if the agent is done"""
+		"""Check if the agent is done.
+
+		Returns:
+			bool: True if done, False otherwise.
+		"""
 		if self.history and len(self.history[-1].result) > 0:
 			last_result = self.history[-1].result[-1]
 			return last_result.is_done is True
 		return False
 
 	def is_successful(self) -> bool | None:
-		"""Check if the agent completed successfully - the agent decides in the last step if it was successful or not. None if not done yet."""
+		"""Check if the agent completed successfully.
+
+		Returns:
+			bool | None: True if successful, False if failed, None if not done.
+		"""
 		if self.history and len(self.history[-1].result) > 0:
 			last_result = self.history[-1].result[-1]
 			if last_result.is_done is True:
@@ -340,19 +489,35 @@ class AgentHistoryList(BaseModel):
 		return None
 
 	def has_errors(self) -> bool:
-		"""Check if the agent has any non-None errors"""
+		"""Check if the agent has any non-None errors.
+
+		Returns:
+			bool: True if errors exist.
+		"""
 		return any(error is not None for error in self.errors())
 
 	def urls(self) -> list[str | None]:
-		"""Get all unique URLs from history"""
+		"""Get all unique URLs from history.
+
+		Returns:
+			list[str | None]: List of URLs.
+		"""
 		return [h.state.url if h.state.url is not None else None for h in self.history]
 
 	def screenshots(self) -> list[str | None]:
-		"""Get all screenshots from history"""
+		"""Get all screenshots from history.
+
+		Returns:
+			list[str | None]: List of screenshots (base64).
+		"""
 		return [h.state.screenshot if h.state.screenshot is not None else None for h in self.history]
 
 	def action_names(self) -> list[str]:
-		"""Get all action names from history"""
+		"""Get all action names from history.
+
+		Returns:
+			list[str]: List of action names.
+		"""
 		action_names = []
 		for action in self.model_actions():
 			actions = list(action.keys())
@@ -361,16 +526,28 @@ class AgentHistoryList(BaseModel):
 		return action_names
 
 	def model_thoughts(self) -> list[AgentBrain]:
-		"""Get all thoughts from history"""
+		"""Get all thoughts from history.
+
+		Returns:
+			list[AgentBrain]: List of agent brain states.
+		"""
 		return [h.model_output.current_state for h in self.history if h.model_output]
 
 	def model_outputs(self) -> list[AgentOutput]:
-		"""Get all model outputs from history"""
+		"""Get all model outputs from history.
+
+		Returns:
+			list[AgentOutput]: List of model outputs.
+		"""
 		return [h.model_output for h in self.history if h.model_output]
 
 	# get all actions with params
 	def model_actions(self) -> list[dict]:
-		"""Get all actions from history"""
+		"""Get all actions from history.
+
+		Returns:
+			list[dict]: List of actions with parameters.
+		"""
 		outputs = []
 
 		for h in self.history:
@@ -382,21 +559,36 @@ class AgentHistoryList(BaseModel):
 		return outputs
 
 	def action_results(self) -> list[ActionResult]:
-		"""Get all results from history"""
+		"""Get all results from history.
+
+		Returns:
+			list[ActionResult]: List of action results.
+		"""
 		results = []
 		for h in self.history:
 			results.extend([r for r in h.result if r])
 		return results
 
 	def extracted_content(self) -> list[str]:
-		"""Get all extracted content from history"""
+		"""Get all extracted content from history.
+
+		Returns:
+			list[str]: List of extracted content strings.
+		"""
 		content = []
 		for h in self.history:
 			content.extend([r.extracted_content for r in h.result if r.extracted_content])
 		return content
 
 	def model_actions_filtered(self, include: list[str] | None = None) -> list[dict]:
-		"""Get all model actions from history as JSON"""
+		"""Get all model actions from history as JSON, filtered by action name.
+
+		Args:
+			include (list[str] | None): List of action names to include.
+
+		Returns:
+			list[dict]: Filtered list of actions.
+		"""
 		if include is None:
 			include = []
 		outputs = self.model_actions()
@@ -408,12 +600,16 @@ class AgentHistoryList(BaseModel):
 		return result
 
 	def number_of_steps(self) -> int:
-		"""Get the number of steps in the history"""
+		"""Get the number of steps in the history.
+
+		Returns:
+			int: Number of steps.
+		"""
 		return len(self.history)
 
 
 class AgentError:
-	"""Container for agent error handling"""
+	"""Container for agent error handling constants and formatting."""
 
 	VALIDATION_ERROR = 'Invalid model output format. Please follow the correct schema.'
 	RATE_LIMIT_ERROR = 'Rate limit reached. Waiting before retry.'
@@ -421,7 +617,15 @@ class AgentError:
 
 	@staticmethod
 	def format_error(error: Exception, include_trace: bool = False) -> str:
-		"""Format error message based on error type and optionally include trace"""
+		"""Format error message based on error type and optionally include trace.
+
+		Args:
+			error (Exception): The exception to format.
+			include_trace (bool): Whether to include the stack trace.
+
+		Returns:
+			str: Formatted error string.
+		"""
 		message = ''
 		if isinstance(error, ValidationError):
 			return f'{AgentError.VALIDATION_ERROR}\nDetails: {str(error)}'

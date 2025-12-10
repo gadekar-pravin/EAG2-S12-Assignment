@@ -16,9 +16,13 @@ browser_session = None
 controller = None
 
 async def ensure_browser_session():
-    """Ensure browser session is initialized"""
+    """Ensures the browser session is initialized.
+
+    Initializes `browser_session` and `controller` global variables if they are None.
+    Creates a new BrowserSession with a specific profile.
+    """
     global browser_session, controller
-    
+
     if browser_session is None:
         profile = BrowserProfile(
             headless=False,
@@ -34,13 +38,22 @@ async def ensure_browser_session():
         await browser_session.start()
 
 async def execute_controller_action(action_name: str, action_params=None, **kwargs) -> ActionResultOutput:
-    """Helper to execute controller actions consistently"""
+    """Helper to execute controller actions consistently.
+
+    Args:
+        action_name (str): The name of the action to execute.
+        action_params (Any): Parameters for the action (dict or Pydantic model).
+        **kwargs: Additional arguments for the controller.
+
+    Returns:
+        ActionResultOutput: The output of the action execution.
+    """
     try:
         await ensure_browser_session()
-        
+
         page = await browser_session.get_current_page()
         ActModel = controller.registry.create_action_model(page=page)
-        
+
         # Handle actions without parameters
         if action_params is None or action_params == {}:
             action_obj = ActModel(**{action_name: {}})
@@ -50,9 +63,9 @@ async def execute_controller_action(action_name: str, action_params=None, **kwar
                 action_params_dict = action_params.model_dump()
             else:
                 action_params_dict = action_params
-            
+
             action_obj = ActModel(**{action_name: action_params_dict})
-        
+
         result = await controller.act(
             action=action_obj,
             browser_session=browser_session,
@@ -60,74 +73,78 @@ async def execute_controller_action(action_name: str, action_params=None, **kwar
             **kwargs
         )
         result_content = result.extracted_content if hasattr(result, 'extracted_content') else None
-        
+
         # Enhanced validation for navigation actions
         success = True
         error_msg = None
-        
+
         if action_name in ["open_tab", "go_to_url"]:
             current_page = await browser_session.get_current_page()
             current_url = current_page.url
-            
+
             # Check for browser error pages
             if any(error_indicator in current_url.lower() for error_indicator in [
                 "chrome-error://", "about:neterror", "edge://", "about:blank"
             ]):
                 success = False
                 error_msg = f"Navigation failed - browser error page: {current_url}"
-            
+
             # For open_tab, check if we have a valid domain
             elif action_name == "open_tab" and action_params:
                 requested_url = action_params.url if hasattr(action_params, 'url') else str(action_params.get('url', ''))
                 if requested_url and not validate_normalized_url(requested_url, current_url):
                     success = False
                     error_msg = f"Open tab failed. Requested: {requested_url}, Final: {current_url}"
-        
+
         # Check if this is a navigation action that needs element refresh
         navigation_actions = [
-            "open_tab", "go_to_url", "go_back", "search_google", 
+            "open_tab", "go_to_url", "go_back", "search_google",
             "click_element_by_index"  # This often causes navigation
         ]
-        
+
         if action_name in navigation_actions and success:
             # Force refresh and get interactive elements
             state = await browser_session.get_state_summary(cache_clickable_elements_hashes=False)
             elements_result = await create_structured_elements_output(
-                state.element_tree, 
+                state.element_tree,
                 strict_mode=True
             )
             elements_json = elements_result.model_dump_json(indent=2, exclude_none=True)
-            
+
             # Combine original result with interactive elements
             combined_content = f"{result_content}\n\nInteractive Elements:\n{elements_json}"
-            
+
             return ActionResultOutput(
                 success=success,
                 content=combined_content,
                 error=error_msg,
                 is_done=False
             )
-        
+
         return ActionResultOutput(
             success=success,
             content=result_content,
             error=error_msg,
             is_done=False
         )
-        
+
     except Exception as e:
         return ActionResultOutput(success=False, error=str(e))
 
 def categorize_element(element) -> tuple[str, str, str]:
-    """
-    Categorize element and determine action type
-    Returns: (category, element_type, action_type)
+    """Categorizes a DOM element and determines its action type.
+
+    Args:
+        element (DOMElementNode): The element to categorize.
+
+    Returns:
+        tuple[str, str, str]: A tuple containing (category, element_type, action_type).
     """
     tag_name = element.tag_name.lower()
     role = element.attributes.get('role', '').lower()
     element_type = element.attributes.get('type', '').lower()
     href = element.attributes.get('href', '')
-    
+
     # Form elements
     if tag_name == 'input':
         if element_type in ['text', 'email', 'password', 'tel', 'url', 'search']:
@@ -144,13 +161,13 @@ def categorize_element(element) -> tuple[str, str, str]:
             return 'form', 'date_input', 'input_text'
         elif element_type == 'submit':
             return 'form', 'submit_button', 'click_element_by_index'
-    
+
     elif tag_name == 'textarea':
         return 'form', 'text_area', 'input_text'
-    
+
     elif tag_name == 'select':
         return 'form', 'dropdown', 'select_dropdown_option'
-    
+
     elif tag_name == 'button':
         if element_type == 'submit':
             return 'form', 'submit_button', 'click_element_by_index'
@@ -160,7 +177,7 @@ def categorize_element(element) -> tuple[str, str, str]:
             return 'interactive', 'tab_button', 'click_element_by_index'
         else:
             return 'interactive', 'button', 'click_element_by_index'
-    
+
     # Navigation elements
     elif tag_name == 'a':
         if href and href not in ['#', 'javascript:void(0)', 'javascript:;']:
@@ -173,27 +190,36 @@ def categorize_element(element) -> tuple[str, str, str]:
         else:
             # Links with no real destination - treat as interactive buttons
             return 'interactive', 'button_link', 'click_element_by_index'
-    
+
     # Hoverable paragraph elements
     elif tag_name == 'p':
         return 'interactive', 'hoverable_text', 'hover item, not implemented yet'
-    
+
     # Default for other interactive elements
     return 'interactive', 'clickable_element', 'click_element_by_index'
 
 def create_element_description(element, category: str, element_type: str) -> str:
-    """Generate a helpful description for the element"""
+    """Generates a helpful description for an element.
+
+    Args:
+        element (DOMElementNode): The element.
+        category (str): The element category.
+        element_type (str): The element type.
+
+    Returns:
+        str: A descriptive string for the element.
+    """
     text = element.get_all_text_till_next_clickable_element().strip()
     placeholder = element.attributes.get('placeholder', '')
     title = element.attributes.get('title', '')
     href = element.attributes.get('href', '')
-    
+
     if category == 'navigation':
         if href.startswith('http'):
             return f"Navigate to external link: {text or href}"
         else:
             return f"Navigate to: {text or 'page section'}"
-    
+
     elif category == 'form':
         if element_type == 'text_input':
             return f"Text input field: {placeholder or text or 'enter text'}"
@@ -209,7 +235,7 @@ def create_element_description(element, category: str, element_type: str) -> str
             return f"Checkbox: {text or 'toggle option'}"
         elif element_type == 'file_upload':
             return f"File upload: {text or 'select file'}"
-        
+
     elif category == 'interactive':
         if element_type == 'button':
             return f"Button: {text or 'click to activate'}"
@@ -217,31 +243,39 @@ def create_element_description(element, category: str, element_type: str) -> str
             return f"Tab: {text or 'switch tab'}"
         elif element_type == 'email_link':
             return f"Send email to: {href.replace('mailto:', '')}"
-    
+
     return f"{element_type.replace('_', ' ').title()}: {text or 'interactive element'}"
 
 async def filter_essential_interactive_elements(element_tree, strict_mode: bool = False) -> List:
-    """Filter for only essential interactive elements that an LLM would want to interact with"""
+    """Filters the element tree for essential interactive elements.
+
+    Args:
+        element_tree (DOMElementNode): The root of the element tree.
+        strict_mode (bool): Whether to use strict filtering (essential form/nav only).
+
+    Returns:
+        List: A list of filtered interactive elements.
+    """
     from browserMCP.dom.clickable_element_processor.service import ClickableElementProcessor
-    
+
     all_elements = ClickableElementProcessor.get_clickable_elements(element_tree)
     essential_elements = []
-    
+
     for element in all_elements:
         # ALWAYS filter by is_visible (for ads/noise) - no option needed
         if not element.is_visible:
             continue
-            
+
         tag_name = element.tag_name.lower()
         href = element.attributes.get('href', '')
-        
+
         # Include ALL interactive elements (p, div, span with click handlers)
         if tag_name in ['p', 'div', 'span']:
             text = element.get_all_text_till_next_clickable_element().strip()
             if text and len(text) > 2:  # Only include elements with meaningful text
                 essential_elements.append(element)
                 continue
-        
+
         # STRICT MODE: Only allow essential form/navigation elements
         if strict_mode:
             # Essential form elements only
@@ -253,7 +287,7 @@ async def filter_essential_interactive_elements(element_tree, strict_mode: bool 
                         continue
                 essential_elements.append(element)
                 continue
-                
+
             # Essential navigation only (with real destinations, no external company logos)
             if tag_name == 'a' and href and href not in ['#', 'javascript:void(0)', 'javascript:;']:
                 text = element.get_all_text_till_next_clickable_element().strip()
@@ -264,13 +298,13 @@ async def filter_essential_interactive_elements(element_tree, strict_mode: bool 
                 continue
         else:
             # NORMAL MODE: More permissive but still filtered
-            
+
             # Skip useless links
             if tag_name == 'a' and href in ['#', 'javascript:void(0)', 'javascript:;', '']:
                 text = element.get_all_text_till_next_clickable_element().strip()
                 if not text or len(text) > 100:
                     continue
-            
+
             # Skip duplicate company logo links (common pattern)
             if tag_name == 'a' and href and href.startswith('http'):
                 text = element.get_all_text_till_next_clickable_element().strip()
@@ -278,7 +312,7 @@ async def filter_essential_interactive_elements(element_tree, strict_mode: bool 
                     # Check if we already have this domain
                     domain = href.split('/')[2] if '/' in href[8:] else href[8:]
                     duplicate = any(
-                        e.tag_name.lower() == 'a' and 
+                        e.tag_name.lower() == 'a' and
                         e.attributes.get('href', '').startswith('http') and
                         domain in e.attributes.get('href', '') and
                         not e.get_all_text_till_next_clickable_element().strip()
@@ -286,40 +320,49 @@ async def filter_essential_interactive_elements(element_tree, strict_mode: bool 
                     )
                     if duplicate:
                         continue
-            
+
             # Essential form elements
             if tag_name in ['input', 'textarea', 'select', 'button']:
                 essential_elements.append(element)
                 continue
-                
+
             # Essential navigation elements (with real destinations)
             if tag_name == 'a' and href and href not in ['#', 'javascript:void(0)', 'javascript:;']:
                 essential_elements.append(element)
                 continue
-                
+
             # Essential interactive roles
             role = element.attributes.get('role', '').lower()
             if role in ['button', 'link', 'menuitem', 'tab', 'checkbox', 'radio', 'combobox', 'searchbox', 'textbox']:
                 essential_elements.append(element)
                 continue
-    
+
     return essential_elements
 
 def create_smart_description(element, category: str, element_type: str) -> str:
-    """Create enhanced description in format: Primary Text + Placeholder + (name/id)"""
+    """Creates an enhanced description in format: Primary Text + Placeholder + (name/id).
+
+    Args:
+        element (DOMElementNode): The element.
+        category (str): The element category.
+        element_type (str): The element type.
+
+    Returns:
+        str: The smart description string.
+    """
     text = element.get_all_text_till_next_clickable_element().strip()
     placeholder = element.attributes.get('placeholder', '').strip()
     title = element.attributes.get('title', '').strip()
     name = element.attributes.get('name', '').strip()
     element_id = element.attributes.get('id', '').strip()
     href = element.attributes.get('href', '')
-    
+
     # Special handling for dropdown elements
     if element_type == 'dropdown':
         # Always truncate at first newline for dropdowns
         if text and '\n' in text:
             text = text.split('\n')[0].strip()
-        
+
         # Smart overlap detection
         if hasattr(element, 'children') and text:
             # Get all option texts
@@ -329,14 +372,14 @@ def create_smart_description(element, category: str, element_type: str) -> str:
                     option_text = child.get_all_text_till_next_clickable_element().strip()
                     if option_text:
                         option_texts.append(option_text.lower())
-            
+
             # Check overlap between description words and option words
             text_words = set(text.lower().replace(',', ' ').split())
             option_words = set(' '.join(option_texts).split())
-            
+
             # If high overlap (>30% of description words are in options), description is just listing options
             overlap_ratio = len(text_words.intersection(option_words)) / len(text_words) if text_words else 0
-            
+
             if overlap_ratio > 0.3:  # High overlap - description is redundant
                 # Fall back to meaningful attributes
                 if placeholder:
@@ -348,32 +391,32 @@ def create_smart_description(element, category: str, element_type: str) -> str:
             else:
                 # Low overlap - description is meaningful, keep it
                 return f"{text} ({name})" if name else text
-    
+
     # For all other elements, use existing logic but truncate at newlines
     if text and '\n' in text:
         text = text.split('\n')[0].strip()
-    
+
     # Rest of existing logic...
     primary_text = text or placeholder or title
-    
+
     # Build description parts - avoid duplication
     description_parts = []
-    
+
     # Add primary text
     if primary_text:
         description_parts.append(primary_text)
-    
+
     # Add placeholder ONLY if different from primary text and not already included
     if placeholder and placeholder != primary_text and placeholder not in primary_text:
         description_parts.append(placeholder)
-    
+
     # Add meaningful name/id in parentheses
     identifier = None
     if name and len(name) > 1 and not name.startswith(('formfield', 'form-', 'input-')):
         identifier = name
     elif element_id and len(element_id) > 1 and not element_id.startswith(('radix-', 'form-', 'input-')):
         identifier = element_id
-    
+
     # Construct final description
     if description_parts:
         result = " ".join(description_parts)
@@ -413,22 +456,30 @@ def create_smart_description(element, category: str, element_type: str) -> str:
                 result = f"{element_type.replace('_', ' ').title()}"
         else:
             result = "Interactive element"
-    
+
     return result
 
 async def create_structured_elements_output(element_tree, strict_mode: bool = False) -> StructuredElementsOutput:
-    """Create ultra-compact structured categorized output for LLM consumption"""
+    """Creates categorized output of elements for LLM consumption.
+
+    Args:
+        element_tree (DOMElementNode): The root of the element tree.
+        strict_mode (bool): Whether to use strict filtering.
+
+    Returns:
+        StructuredElementsOutput: Structured object containing classified elements.
+    """
     try:
         elements = await filter_essential_interactive_elements(element_tree, strict_mode)
-        
+
         nav_elements = []
         form_elements = []
         button_elements = []
-        
+
         for element in elements:
             category, element_type, action_type = categorize_element(element)
             smart_description = create_smart_description(element, category, element_type)
-            
+
             # Create element info - only add options for dropdown elements
             if element_type == 'dropdown':
                 # Extract dropdown options for select elements
@@ -443,7 +494,7 @@ async def create_structured_elements_output(element_tree, strict_mode: bool = Fa
                                 options.append(option_text)
                 except:
                     options = None
-                
+
                 element_info = ElementInfo(
                     id=element.highlight_index,
                     desc=smart_description,
@@ -457,14 +508,14 @@ async def create_structured_elements_output(element_tree, strict_mode: bool = Fa
                     desc=smart_description,
                     action=action_type
                 )
-            
+
             if category == 'navigation':
                 nav_elements.append(element_info)
             elif category == 'form':
                 form_elements.append(element_info)
             else:
                 button_elements.append(element_info)
-        
+
         return StructuredElementsOutput(
             success=True,
             nav=nav_elements,
@@ -472,7 +523,7 @@ async def create_structured_elements_output(element_tree, strict_mode: bool = Fa
             buttons=button_elements,
             total=len(elements)
         )
-        
+
     except Exception as e:
         return StructuredElementsOutput(
             success=False,
@@ -488,15 +539,23 @@ async def get_browser_session():
 async def stop_browser_session():
     """Stop the browser session and clean up"""
     global browser_session, controller
-    
+
     if browser_session is not None:
         await browser_session.stop()
         browser_session = None
         controller = None
 
 def format_elements_for_llm(element_tree, format_type: str = "structured") -> str:
-    """Simple formatter using browser-use's existing filtering"""
-    
+    """Formats elements for LLM consumption.
+
+    Args:
+        element_tree (DOMElementNode): The root of the element tree.
+        format_type (str): "structured" for JSON or other for string representation.
+
+    Returns:
+        str: Formatted string of elements.
+    """
+
     if format_type == "structured":
         return format_structured_output(element_tree)
     else:
@@ -505,23 +564,30 @@ def format_elements_for_llm(element_tree, format_type: str = "structured") -> st
         )
 
 def format_structured_output(element_tree) -> str:
-    """Format in categories but use existing browser-use data"""
+    """Formats elements into a categorized JSON string.
+
+    Args:
+        element_tree (DOMElementNode): The root of the element tree.
+
+    Returns:
+        str: JSON string of categorized elements.
+    """
     from browserMCP.dom.clickable_element_processor.service import ClickableElementProcessor
-    
+
     elements = ClickableElementProcessor.get_clickable_elements(element_tree)
-    
+
     nav_elements = []
     form_elements = []
     interactive_elements = []
-    
+
     for element in elements:
-        if not element.is_visible:  # Use browser-use's visibility flag
+        if not element.is_visible:  # Use browser-use's existing visibility flag
             continue
-            
+
         # Simple categorization using existing data
         tag = element.tag_name.lower()
         href = element.attributes.get('href', '')
-        
+
         element_info = {
             "id": element.highlight_index,
             "type": tag,
@@ -529,24 +595,24 @@ def format_structured_output(element_tree) -> str:
             "action": "click_element_by_index",
             "params": {"index": element.highlight_index}
         }
-        
+
         if tag == 'a' and href and href not in ['#', '']:
             nav_elements.append(element_info)
         elif tag in ['input', 'textarea', 'select', 'button']:
             form_elements.append(element_info)
         else:
             interactive_elements.append(element_info)
-    
+
     return json.dumps({
         "navigation": nav_elements,
-        "forms": form_elements, 
+        "forms": form_elements,
         "interactive": interactive_elements
     }, indent=2)
 
 def normalize_url(url: str) -> str:
     """
     Normalize URL by adding protocol if missing and validating format
-    
+
     Examples:
     - "news.ycombinator.com" -> "https://news.ycombinator.com"
     - "google.com" -> "https://google.com"
@@ -557,17 +623,17 @@ def normalize_url(url: str) -> str:
     """
     if not url or not isinstance(url, str):
         return url
-    
+
     url = url.strip()
-    
+
     # If already has protocol, return as-is
     if url.startswith(('http://', 'https://', 'file://', 'ftp://')):
         return url
-    
+
     # Special cases for localhost and IP addresses - use http
     if url.startswith(('localhost', '127.0.0.1', '0.0.0.0')) or re.match(r'^\d+\.\d+\.\d+\.\d+', url):
         return f"http://{url}"
-    
+
     # For everything else, use https as default
     # Handle cases like "www.example.com" or "example.com"
     return f"https://{url}"
@@ -575,52 +641,52 @@ def normalize_url(url: str) -> str:
 def validate_normalized_url(original_url: str, final_url: str) -> bool:
     """
     Validate that the browser actually navigated to the expected domain
-    
+
     Args:
         original_url: The URL we tried to navigate to
         final_url: The URL the browser actually ended up at
-    
+
     Returns:
         True if navigation was successful, False otherwise
     """
     if not original_url or not final_url:
         return False
-    
+
     # Parse both URLs to get domains
     try:
         original_parsed = urlparse(normalize_url(original_url))
         final_parsed = urlparse(final_url)
-        
+
         original_domain = original_parsed.netloc.lower()
         final_domain = final_parsed.netloc.lower()
-        
+
         # Remove 'www.' prefix for comparison
         original_domain = original_domain.replace('www.', '')
         final_domain = final_domain.replace('www.', '')
-        
+
         # Check for error pages
         error_indicators = [
-            'chrome-error://', 'about:neterror', 'edge://', 
+            'chrome-error://', 'about:neterror', 'edge://',
             'about:blank', 'data:text/html', 'chrome://new-tab'
         ]
-        
+
         if any(indicator in final_url.lower() for indicator in error_indicators):
             return False
-        
+
         # Check if domains match
         return original_domain == final_domain or original_domain in final_domain or final_domain in original_domain
-        
+
     except Exception:
         return False
 
 def save_base64_as_png(base64_data: str, prefix: str = "screenshot") -> str:
     """
     Convert base64 image data to PNG file and return the file path
-    
+
     Args:
         base64_data: Base64 encoded image string
         prefix: Prefix for the filename (e.g., "screenshot", "snapshot")
-    
+
     Returns:
         File path of the saved PNG image
     """
@@ -628,33 +694,40 @@ def save_base64_as_png(base64_data: str, prefix: str = "screenshot") -> str:
         # Create screenshots directory if it doesn't exist
         screenshots_dir = Path("media/screenshots")
         screenshots_dir.mkdir(parents=True, exist_ok=True)
-        
+
         # Generate unique filename with timestamp
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S_%f")[:-3]  # microseconds to milliseconds
         filename = f"{prefix}_{timestamp}.png"
         filepath = screenshots_dir / filename
-        
+
         # Remove data URL prefix if present (data:image/png;base64,)
         if base64_data.startswith('data:'):
             base64_data = base64_data.split(',', 1)[1]
-        
+
         # Decode base64 and save as PNG
         image_bytes = base64.b64decode(base64_data)
-        
+
         with open(filepath, 'wb') as f:
             f.write(image_bytes)
-        
+
         # Return relative path for portability
         return str(filepath)
-        
+
     except Exception as e:
         return f"Error saving image: {str(e)}"
 
 def get_image_info(filepath: str) -> dict:
-    """Get basic info about the saved image"""
+    """Get basic info about the saved image.
+
+    Args:
+        filepath (str): Path to the image file.
+
+    Returns:
+        dict: Dictionary containing width, height, format, and size_kb.
+    """
     try:
         from PIL import Image
-        
+
         with Image.open(filepath) as img:
             return {
                 "width": img.width,
@@ -672,7 +745,14 @@ def get_image_info(filepath: str) -> dict:
         return {}
 
 async def remove_browser_overlays(browser_session):
-    """Remove browser automation overlays from the page"""
+    """Remove browser automation overlays from the page.
+
+    Args:
+        browser_session (BrowserSession): The current browser session.
+
+    Returns:
+        bool: True if successful, False otherwise.
+    """
     try:
         page = await browser_session.get_current_page()
         await page.evaluate("""
@@ -680,7 +760,7 @@ async def remove_browser_overlays(browser_session):
                 // Remove browser-use and automation overlays
                 const selectors = [
                     '[data-browser-use]',
-                    '[class*="highlight"]', 
+                    '[class*="highlight"]',
                     '[style*="outline"]',
                     '[style*="border: 2px"]',
                     '[style*="border: 3px"]',
@@ -688,12 +768,12 @@ async def remove_browser_overlays(browser_session):
                     '[data-element-index]',
                     '[data-highlight]'
                 ];
-                
+
                 selectors.forEach(selector => {
                     const elements = document.querySelectorAll(selector);
                     elements.forEach(el => el.remove());
                 });
-                
+
                 // Remove inline styles that look like automation overlays
                 const allElements = document.querySelectorAll('*');
                 allElements.forEach(el => {
@@ -706,7 +786,7 @@ async def remove_browser_overlays(browser_session):
                         el.style.backgroundColor = '';
                     }
                 });
-                
+
                 return true;
             }
         """)
@@ -716,7 +796,16 @@ async def remove_browser_overlays(browser_session):
         return False
 
 async def take_clean_screenshot(browser_session, full_page: bool = False, remove_overlays: bool = True):
-    """Take a screenshot with optional overlay removal"""
+    """Take a screenshot with optional overlay removal.
+
+    Args:
+        browser_session (BrowserSession): The current browser session.
+        full_page (bool): Whether to take a full page screenshot.
+        remove_overlays (bool): Whether to remove overlays before capturing.
+
+    Returns:
+        str: Base64 encoded screenshot.
+    """
     try:
         # Remove overlays if requested
         if remove_overlays:
@@ -724,11 +813,11 @@ async def take_clean_screenshot(browser_session, full_page: bool = False, remove
             # Small delay to ensure overlays are removed
             import asyncio
             await asyncio.sleep(0.1)
-        
+
         # Take the screenshot
         screenshot_base64 = await browser_session.take_screenshot(full_page=full_page)
         return screenshot_base64
-        
+
     except Exception as e:
         # Fallback to regular screenshot if overlay removal fails
         return await browser_session.take_screenshot(full_page=full_page)

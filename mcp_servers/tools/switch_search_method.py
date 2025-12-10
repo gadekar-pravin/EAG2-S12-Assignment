@@ -17,11 +17,17 @@ SEARCH_ENGINES = [
 ]
 
 class RateLimiter:
+    """Simple rate limiter to prevent spamming requests."""
     def __init__(self, cooldown_seconds=2):
         self.cooldown = timedelta(seconds=cooldown_seconds)
         self.last_called = {}
 
     async def acquire(self, key: str):
+        """Waits if the key has been called recently.
+
+        Args:
+            key (str): The identifier for the resource being limited.
+        """
         now = datetime.now()
         last = self.last_called.get(key)
         if last and (now - last) < self.cooldown:
@@ -33,6 +39,11 @@ class RateLimiter:
 rate_limiter = RateLimiter(cooldown_seconds=2)
 
 def get_random_headers():
+    """Generates a random User-Agent header.
+
+    Returns:
+        dict: A dictionary containing the 'User-Agent' header.
+    """
     user_agents = [
         "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/122.0.0.0 Safari/537.36",
         "Mozilla/5.0 (Macintosh; Intel Mac OS X 13_4) AppleWebKit/537.36 Chrome/113.0.5672.92 Safari/537.36",
@@ -48,6 +59,14 @@ def get_random_headers():
     return {"User-Agent": random.choice(user_agents)}
 
 async def use_duckduckgo_http(query: str) -> List[str]:
+    """Performs a search using DuckDuckGo HTML version via HTTP requests.
+
+    Args:
+        query (str): The search query.
+
+    Returns:
+        List[str]: A list of result URLs.
+    """
     await rate_limiter.acquire("duck_http")
     url = "https://html.duckduckgo.com/html"
     headers = get_random_headers()
@@ -76,6 +95,15 @@ async def use_duckduckgo_http(query: str) -> List[str]:
         return links
 
 async def use_playwright_search(query: str, engine: str) -> List[str]:
+    """Performs a search using various engines via Playwright automation.
+
+    Args:
+        query (str): The search query.
+        engine (str): The search engine identifier (e.g., "duck_playwright", "bing_playwright").
+
+    Returns:
+        List[str]: A list of result URLs.
+    """
     await rate_limiter.acquire(engine)
     urls = []
     async with async_playwright() as p:
@@ -158,6 +186,15 @@ async def use_playwright_search(query: str, engine: str) -> List[str]:
     return urls
 
 async def smart_search(query: str, limit: int = 5) -> List[str]:
+    """Attempts to find search results by trying multiple engines sequentially.
+
+    Args:
+        query (str): The search query.
+        limit (int): The maximum number of results to return. Defaults to 5.
+
+    Returns:
+        List[str]: A list of found URLs.
+    """
     random.shuffle(SEARCH_ENGINES)
 
     for engine in SEARCH_ENGINES:

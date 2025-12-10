@@ -5,14 +5,22 @@ from browserMCP.dom.views import DOMElementNode
 
 
 class HistoryTreeProcessor:
-	""" "
-	Operations on the DOM elements
+	"""
+	Operations on the DOM elements history.
 
 	@dev be careful - text nodes can change even if elements stay the same
 	"""
 
 	@staticmethod
 	def convert_dom_element_to_history_element(dom_element: DOMElementNode) -> DOMHistoryElement:
+		"""Converts a DOMElementNode to a DOMHistoryElement.
+
+		Args:
+			dom_element (DOMElementNode): The DOM element to convert.
+
+		Returns:
+			DOMHistoryElement: The converted history element.
+		"""
 		from browserMCP.browser.context import BrowserContext
 
 		parent_branch_path = HistoryTreeProcessor._get_parent_branch_path(dom_element)
@@ -32,6 +40,15 @@ class HistoryTreeProcessor:
 
 	@staticmethod
 	def find_history_element_in_tree(dom_history_element: DOMHistoryElement, tree: DOMElementNode) -> DOMElementNode | None:
+		"""Finds a history element within a DOM tree.
+
+		Args:
+			dom_history_element (DOMHistoryElement): The element to search for.
+			tree (DOMElementNode): The root of the DOM tree.
+
+		Returns:
+			DOMElementNode | None: The found element or None.
+		"""
 		hashed_dom_history_element = HistoryTreeProcessor._hash_dom_history_element(dom_history_element)
 
 		def process_node(node: DOMElementNode):
@@ -50,6 +67,15 @@ class HistoryTreeProcessor:
 
 	@staticmethod
 	def compare_history_element_and_dom_element(dom_history_element: DOMHistoryElement, dom_element: DOMElementNode) -> bool:
+		"""Compares a history element and a DOM element for equality based on hashes.
+
+		Args:
+			dom_history_element (DOMHistoryElement): The history element.
+			dom_element (DOMElementNode): The DOM element.
+
+		Returns:
+			bool: True if they are effectively the same element.
+		"""
 		hashed_dom_history_element = HistoryTreeProcessor._hash_dom_history_element(dom_history_element)
 		hashed_dom_element = HistoryTreeProcessor._hash_dom_element(dom_element)
 
@@ -57,6 +83,14 @@ class HistoryTreeProcessor:
 
 	@staticmethod
 	def _hash_dom_history_element(dom_history_element: DOMHistoryElement) -> HashedDomElement:
+		"""Hashes a DOMHistoryElement.
+
+		Args:
+			dom_history_element (DOMHistoryElement): The element to hash.
+
+		Returns:
+			HashedDomElement: The hash representation.
+		"""
 		branch_path_hash = HistoryTreeProcessor._parent_branch_path_hash(dom_history_element.entire_parent_branch_path)
 		attributes_hash = HistoryTreeProcessor._attributes_hash(dom_history_element.attributes)
 		xpath_hash = HistoryTreeProcessor._xpath_hash(dom_history_element.xpath)
@@ -65,6 +99,14 @@ class HistoryTreeProcessor:
 
 	@staticmethod
 	def _hash_dom_element(dom_element: DOMElementNode) -> HashedDomElement:
+		"""Hashes a DOMElementNode.
+
+		Args:
+			dom_element (DOMElementNode): The element to hash.
+
+		Returns:
+			HashedDomElement: The hash representation.
+		"""
 		parent_branch_path = HistoryTreeProcessor._get_parent_branch_path(dom_element)
 		branch_path_hash = HistoryTreeProcessor._parent_branch_path_hash(parent_branch_path)
 		attributes_hash = HistoryTreeProcessor._attributes_hash(dom_element.attributes)
@@ -75,6 +117,14 @@ class HistoryTreeProcessor:
 
 	@staticmethod
 	def _get_parent_branch_path(dom_element: DOMElementNode) -> list[str]:
+		"""Recursively gets the parent branch path (tag names) for an element.
+
+		Args:
+			dom_element (DOMElementNode): The element.
+
+		Returns:
+			list[str]: List of tag names from root to parent.
+		"""
 		parents: list[DOMElementNode] = []
 		current_element: DOMElementNode = dom_element
 		while current_element.parent is not None:
@@ -87,20 +137,23 @@ class HistoryTreeProcessor:
 
 	@staticmethod
 	def _parent_branch_path_hash(parent_branch_path: list[str]) -> str:
+		"""Hashes the parent branch path string."""
 		parent_branch_path_string = '/'.join(parent_branch_path)
 		return hashlib.sha256(parent_branch_path_string.encode()).hexdigest()
 
 	@staticmethod
 	def _attributes_hash(attributes: dict[str, str]) -> str:
+		"""Hashes the attributes string."""
 		attributes_string = ''.join(f'{key}={value}' for key, value in attributes.items())
 		return hashlib.sha256(attributes_string.encode()).hexdigest()
 
 	@staticmethod
 	def _xpath_hash(xpath: str) -> str:
+		"""Hashes the XPath string."""
 		return hashlib.sha256(xpath.encode()).hexdigest()
 
 	@staticmethod
 	def _text_hash(dom_element: DOMElementNode) -> str:
-		""" """
+		"""Hashes the text content of an element."""
 		text_string = dom_element.get_all_text_till_next_clickable_element()
 		return hashlib.sha256(text_string.encode()).hexdigest()

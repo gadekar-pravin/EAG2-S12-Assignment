@@ -189,6 +189,13 @@ CHROME_DEFAULT_ARGS = [
 
 @cache
 def get_display_size() -> ViewportSize | None:
+	"""Determines the display size of the primary monitor.
+
+	Supports macOS, Windows, and Linux.
+
+	Returns:
+		ViewportSize | None: The width and height of the display, or None if detection fails.
+	"""
 	# macOS
 	try:
 		from AppKit import NSScreen
@@ -212,7 +219,11 @@ def get_display_size() -> ViewportSize | None:
 
 
 def get_window_adjustments() -> tuple[int, int]:
-	"""Returns recommended x, y offsets for window positioning"""
+	"""Returns recommended x, y offsets for window positioning based on the platform.
+
+	Returns:
+		tuple[int, int]: The x and y offsets.
+	"""
 
 	if sys.platform == 'darwin':  # macOS
 		return -4, 24  # macOS has a small title bar, no border
@@ -621,6 +632,7 @@ class BrowserProfile(BrowserConnectArgs, BrowserLaunchPersistentContextArgs, Bro
 		return self
 
 	def get_args(self) -> list[str]:
+		"""Constructs the list of CLI arguments for the browser."""
 		if isinstance(self.ignore_default_args, list):
 			default_args = set(CHROME_DEFAULT_ARGS) - set(self.ignore_default_args)
 		elif self.ignore_default_args is True:
