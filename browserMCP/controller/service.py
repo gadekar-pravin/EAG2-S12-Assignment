@@ -44,11 +44,22 @@ class PromptTemplate():
 
 
 class Controller(Generic[Context]):
+	"""Controls the browser by executing registered actions.
+
+	This class manages the registry of available browser actions and handles
+	their execution via the `act` method.
+	"""
 	def __init__(
 		self,
 		exclude_actions: list[str] = [],
 		output_model: type[BaseModel] | None = None,
 	):
+		"""Initializes the Controller with default actions.
+
+		Args:
+			exclude_actions (list[str]): List of action names to exclude.
+			output_model (type[BaseModel] | None): Optional Pydantic model for structured output.
+		"""
 		self.registry = Registry[Context](exclude_actions)
 
 		"""Register all default browser actions"""

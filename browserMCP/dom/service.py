@@ -22,12 +22,20 @@ logger = logging.getLogger(__name__)
 
 @dataclass
 class ViewportInfo:
+	"""Information about the viewport dimensions."""
 	width: int
 	height: int
 
 
 class DomService:
+	"""Service for interacting with and processing the DOM of a page."""
+
 	def __init__(self, page: 'Page'):
+		"""Initializes the DomService.
+
+		Args:
+			page (Page): The Playwright page instance.
+		"""
 		self.page = page
 		self.xpath_cache = {}
 
@@ -41,11 +49,26 @@ class DomService:
 		focus_element: int = -1,
 		viewport_expansion: int = 0,
 	) -> DOMState:
+		"""Retrieves clickable elements from the page and builds the DOM state.
+
+		Args:
+			highlight_elements (bool): Whether to highlight interactive elements. Defaults to True.
+			focus_element (int): The index of the element to focus on. Defaults to -1.
+			viewport_expansion (int): Pixels to expand the viewport for element detection. Defaults to 0.
+
+		Returns:
+			DOMState: The processed DOM state including the element tree and selector map.
+		"""
 		element_tree, selector_map = await self._build_dom_tree(highlight_elements, focus_element, viewport_expansion)
 		return DOMState(element_tree=element_tree, selector_map=selector_map)
 
 	@time_execution_async('--get_cross_origin_iframes')
 	async def get_cross_origin_iframes(self) -> list[str]:
+		"""Retrieves URLs of cross-origin iframes, excluding ads and hidden frames.
+
+		Returns:
+			list[str]: A list of cross-origin iframe URLs.
+		"""
 		# invisible cross-origin iframes are used for ads and tracking, dont open those
 		hidden_frame_urls = await self.page.locator('iframe').filter(visible=False).evaluate_all('e => e.map(e => e.src)')
 
@@ -69,6 +92,19 @@ class DomService:
 		focus_element: int,
 		viewport_expansion: int,
 	) -> tuple[DOMElementNode, SelectorMap]:
+		"""Builds the DOM tree by executing JavaScript in the browser.
+
+		Args:
+			highlight_elements (bool): Whether to highlight elements.
+			focus_element (int): The element index to focus.
+			viewport_expansion (int): Viewport expansion value.
+
+		Returns:
+			tuple[DOMElementNode, SelectorMap]: The root element node and the selector map.
+
+		Raises:
+			ValueError: If JavaScript execution fails or validation fails.
+		"""
 		if await self.page.evaluate('1+1') != 2:
 			raise ValueError('The page cannot evaluate javascript code properly')
 
@@ -118,6 +154,14 @@ class DomService:
 		self,
 		eval_page: dict,
 	) -> tuple[DOMElementNode, SelectorMap]:
+		"""Constructs the DOM tree from the data returned by the browser.
+
+		Args:
+			eval_page (dict): The dictionary returned by the JavaScript evaluation.
+
+		Returns:
+			tuple[DOMElementNode, SelectorMap]: The root DOM element and the selector map.
+		"""
 		js_node_map = eval_page['map']
 		js_root_id = eval_page['rootId']
 
@@ -161,6 +205,14 @@ class DomService:
 		self,
 		node_data: dict,
 	) -> tuple[DOMBaseNode | None, list[int]]:
+		"""Parses a single node dictionary into a DOMNode object.
+
+		Args:
+			node_data (dict): The data for a single node.
+
+		Returns:
+			tuple[DOMBaseNode | None, list[int]]: The parsed node object (or None) and a list of child IDs.
+		"""
 		if not node_data:
 			return None, []
 

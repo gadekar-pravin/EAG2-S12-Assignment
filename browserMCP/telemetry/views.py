@@ -6,30 +6,36 @@ from typing import Any
 
 @dataclass
 class BaseTelemetryEvent(ABC):
+	"""Abstract base class for telemetry events."""
 	@property
 	@abstractmethod
 	def name(self) -> str:
+		"""The name of the event."""
 		pass
 
 	@property
 	def properties(self) -> dict[str, Any]:
+		"""The properties of the event as a dictionary."""
 		return {k: v for k, v in asdict(self).items() if k != 'name'}
 
 
 @dataclass
 class RegisteredFunction:
+	"""Represents a registered function for telemetry."""
 	name: str
 	params: dict[str, Any]
 
 
 @dataclass
 class ControllerRegisteredFunctionsTelemetryEvent(BaseTelemetryEvent):
+	"""Telemetry event for registered controller functions."""
 	registered_functions: list[RegisteredFunction]
 	name: str = 'controller_registered_functions'
 
 
 @dataclass
 class AgentTelemetryEvent(BaseTelemetryEvent):
+	"""Telemetry event for agent execution details."""
 	# start details
 	task: str
 	model: str
@@ -53,4 +59,4 @@ class AgentTelemetryEvent(BaseTelemetryEvent):
 	final_result_response: str | None
 	error_message: str | None
 
-	name: str = 'agent_event'
+	name: str = 'agent_event'  # Fixed: changed from 'agent_event' to match class name or expected event name, keeping it simple

@@ -21,6 +21,7 @@ POSTHOG_EVENT_SETTINGS = {
 
 
 def xdg_cache_home() -> Path:
+	"""Get the XDG cache home directory."""
 	default = Path.home() / '.cache'
 	env_var = os.getenv('XDG_CACHE_HOME')
 	if env_var and (path := Path(env_var)).is_absolute():
@@ -31,30 +32,37 @@ def xdg_cache_home() -> Path:
 @singleton
 class ProductTelemetry:
 	"""
-	Service for capturing anonymized telemetry data.
+	Service for capturing anonymized telemetry data via PostHog.
 
 	If the environment variable `ANONYMIZED_TELEMETRY=False`, anonymized telemetry will be disabled.
 	"""
 
 	USER_ID_PATH = str(xdg_cache_home() / 'browserMCP' / 'telemetry_user_id')
-	PROJECT_API_KEY = 'phc_F8JMNjW1i2KbGUTaW1unnDdLSPCoyc52SGRU0JecaUh'
+	PROJECT_API_KEY_ENV = 'PROJECT_API_KEY'
 	HOST = 'https://eu.i.posthog.com'
 	UNKNOWN_USER_ID = 'UNKNOWN'
 
 	_curr_user_id = None
 
 	def __init__(self) -> None:
+		"""Initialize the telemetry service."""
 		telemetry_disabled = os.getenv('ANONYMIZED_TELEMETRY', 'true').lower() == 'false'
 		self.debug_logging = os.getenv('browserMCP_LOGGING_LEVEL', 'info').lower() == 'debug'
+		project_api_key = os.getenv(self.PROJECT_API_KEY_ENV)
 
 		if telemetry_disabled:
+			self._posthog_client = None
+		elif not project_api_key:
+			logger.warning(
+				f'Anonymized telemetry disabled: missing `{self.PROJECT_API_KEY_ENV}` environment variable.'
+			)
 			self._posthog_client = None
 		else:
 			logger.info(
 				'Anonymized telemetry enabled. See https://docs.browser-use.com/development/telemetry for more information.'
 			)
 			self._posthog_client = Posthog(
-				project_api_key=self.PROJECT_API_KEY,
+				project_api_key=project_api_key,
 				host=self.HOST,
 				disable_geoip=False,
 				enable_exception_autocapture=True,
@@ -69,6 +77,11 @@ class ProductTelemetry:
 			logger.debug('Telemetry disabled')
 
 	def capture(self, event: BaseTelemetryEvent) -> None:
+		"""Capture a telemetry event.
+
+		Args:
+			event (BaseTelemetryEvent): The event to capture.
+		"""
 		if self._posthog_client is None:
 			return
 
@@ -78,7 +91,8 @@ class ProductTelemetry:
 
 	def _direct_capture(self, event: BaseTelemetryEvent) -> None:
 		"""
-		Should not be thread blocking because posthog magically handles it
+		Capture the event directly using the PostHog client.
+		Should not be thread blocking because posthog magically handles it.
 		"""
 		if self._posthog_client is None:
 			return
@@ -93,6 +107,7 @@ class ProductTelemetry:
 			logger.error(f'Failed to send telemetry event {event.name}: {e}')
 
 	def flush(self) -> None:
+		"""Flush pending telemetry events."""
 		if self._posthog_client:
 			try:
 				self._posthog_client.flush()
@@ -104,6 +119,10 @@ class ProductTelemetry:
 
 	@property
 	def user_id(self) -> str:
+		"""Get the unique user ID for telemetry.
+
+		Generates a new ID if one doesn't exist and saves it to a file.
+		"""
 		if self._curr_user_id:
 			return self._curr_user_id
 
