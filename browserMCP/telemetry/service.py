@@ -38,7 +38,7 @@ class ProductTelemetry:
 	"""
 
 	USER_ID_PATH = str(xdg_cache_home() / 'browserMCP' / 'telemetry_user_id')
-	PROJECT_API_KEY = 'phc_F8JMNjW1i2KbGUTaW1unnDdLSPCoyc52SGRU0JecaUh'
+	PROJECT_API_KEY_ENV = 'PROJECT_API_KEY'
 	HOST = 'https://eu.i.posthog.com'
 	UNKNOWN_USER_ID = 'UNKNOWN'
 
@@ -48,15 +48,21 @@ class ProductTelemetry:
 		"""Initialize the telemetry service."""
 		telemetry_disabled = os.getenv('ANONYMIZED_TELEMETRY', 'true').lower() == 'false'
 		self.debug_logging = os.getenv('browserMCP_LOGGING_LEVEL', 'info').lower() == 'debug'
+		project_api_key = os.getenv(self.PROJECT_API_KEY_ENV)
 
 		if telemetry_disabled:
+			self._posthog_client = None
+		elif not project_api_key:
+			logger.warning(
+				f'Anonymized telemetry disabled: missing `{self.PROJECT_API_KEY_ENV}` environment variable.'
+			)
 			self._posthog_client = None
 		else:
 			logger.info(
 				'Anonymized telemetry enabled. See https://docs.browser-use.com/development/telemetry for more information.'
 			)
 			self._posthog_client = Posthog(
-				project_api_key=self.PROJECT_API_KEY,
+				project_api_key=project_api_key,
 				host=self.HOST,
 				disable_geoip=False,
 				enable_exception_autocapture=True,
